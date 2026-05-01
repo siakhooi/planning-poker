@@ -4,10 +4,14 @@ Fibo Planner helps agile teams run the planning poker technique—using Fibonacc
 
 ## Reference:
 
+### Deliverables
+
+- https://hub.docker.com/r/siakhooi/fibo-planner
+
 ### Quality
+
 - https://sonarcloud.io/project/overview?id=siakhooi_fibo-planner
 - https://qlty.sh/gh/siakhooi/projects/fibo-planner
-
 
 ## Badges
 
