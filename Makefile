@@ -11,7 +11,7 @@ build:
 	go mod tidy
 	scripts/build.sh 2>&1 | tee build.log
 
-build-all: build docker-build
+all: build docker-build
 
 clean:
 	rm -f *.log
