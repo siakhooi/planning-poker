@@ -1,1 +1,4 @@
 *.log
+test-coverage.out
+test-coverage.html
+test-report.json

@@ -5,7 +5,8 @@ curl:
 
 golangci-lint:
 	golangci-lint run 2>&1 | tee golangci-lint.log
-
+test:
+	./scripts/test.sh
 build:
 	go mod tidy
 	scripts/build.sh 2>&1 | tee build.log
