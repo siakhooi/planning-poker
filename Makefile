@@ -13,6 +13,9 @@ build:
 
 all: build docker-build
 
+release:
+	scripts/create-release.sh
+
 clean:
 	rm -f *.log
 
