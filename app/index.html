@@ -24,6 +24,33 @@
       color: #444;
       margin-top: 1rem;
     }
+
+    .lobby-table {
+      width: 100%;
+      max-width: 28rem;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    .lobby-table th,
+    .lobby-table td {
+      text-align: left;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid #ddd;
+    }
+
+    .lobby-table thead th {
+      background: #f5f5f5;
+      font-weight: 600;
+    }
+
+    .lobby-table tbody tr:nth-child(even) {
+      background: #fafafa;
+    }
+
+    .lobby-table a {
+      color: #2563eb;
+    }
   </style>
 </head>
 
@@ -50,11 +77,29 @@
     </form>
   </section>
   <section>
+    <h2 style="font-size: 1.15rem; margin: 1.5rem 0 0.5rem;">Lobby and rooms</h2>
+    <p style="margin: 0 0 0.75rem; color: #444; font-size: 0.95rem;">Live counts update while this page is open.</p>
     <div hx-ext="ws" ws-connect="/ws" class="meta">
-      <p>
-        Users in Lobby (this page):
-        <strong id="session-count">{{.Count}}</strong>
-      </p>
+      <table id="lobby-overview" class="lobby-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Users</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Lobby (this page)</td>
+            <td><strong id="session-count">{{.LobbyCount}}</strong></td>
+          </tr>
+          {{range .Rooms}}
+          <tr>
+            <td><a href="/{{.RoomID}}">{{.DisplayName}}</a></td>
+            <td>{{.Count}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
     </div>
   </section>
 

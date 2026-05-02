@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -65,23 +66,15 @@ func (h *Hub) count() int {
 	return len(h.conns)
 }
 
-// broadcastCount sends an HTMX out-of-band swap so every client in this room updates the counter.
-func (h *Hub) broadcastCount() {
-	n := h.count()
-	fragment := fmt.Sprintf(
-		`<strong id="session-count" hx-swap-oob="true">%d</strong>`,
-		n,
-	)
-
+func (h *Hub) writeTextToAll(payload []byte) {
 	h.mu.Lock()
 	conns := make([]*websocket.Conn, 0, len(h.conns))
 	for c := range h.conns {
 		conns = append(conns, c)
 	}
 	h.mu.Unlock()
-
 	for _, c := range conns {
-		if err := c.WriteMessage(websocket.TextMessage, []byte(fragment)); err != nil {
+		if err := c.WriteMessage(websocket.TextMessage, payload); err != nil {
 			log.Printf("websocket write: %v", err)
 		}
 	}
@@ -138,21 +131,70 @@ func newApp() *App {
 	}
 }
 
-func runIndexHubWebSocket(w http.ResponseWriter, r *http.Request, h *Hub) {
+// LobbyRoomRow is one row in the index lobby table (html/template requires exported fields).
+type LobbyRoomRow struct {
+	RoomID      string
+	DisplayName string
+	Count       int
+}
+
+func (a *App) lobbyOverviewOOBHTML() string {
+	a.mu.Lock()
+	lobbyCount := a.indexHub.count()
+	var ids []string
+	for id := range a.roomHubs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var b strings.Builder
+	b.WriteString(`<table id="lobby-overview" class="lobby-table" hx-swap-oob="true"><thead><tr><th scope="col">Name</th><th scope="col">Users</th></tr></thead><tbody>`)
+	b.WriteString(`<tr><td>Lobby (this page)</td><td><strong id="session-count">`)
+	b.WriteString(strconv.Itoa(lobbyCount))
+	b.WriteString(`</strong></td></tr>`)
+	for _, id := range ids {
+		cnt := a.roomHubs[id].count()
+		nm := a.roomNames[id]
+		disp := nm
+		if disp == "" {
+			disp = "Room " + id
+		} else {
+			disp = nm + " · " + id
+		}
+		b.WriteString(`<tr><td><a href="/`)
+		b.WriteString(id)
+		b.WriteString(`">`)
+		b.WriteString(html.EscapeString(disp))
+		b.WriteString(`</a></td><td>`)
+		b.WriteString(strconv.Itoa(cnt))
+		b.WriteString(`</td></tr>`)
+	}
+	b.WriteString(`</tbody></table>`)
+	a.mu.Unlock()
+	return b.String()
+}
+
+// broadcastLobbyState pushes the lobby overview table to everyone on the index page WebSocket.
+func (a *App) broadcastLobbyState() {
+	fragment := a.lobbyOverviewOOBHTML()
+	a.indexHub.writeTextToAll([]byte(fragment))
+}
+
+func runIndexHubWebSocket(w http.ResponseWriter, r *http.Request, a *App) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade: %v", err)
 		return
 	}
 
-	h.add(conn, "")
-	h.broadcastCount()
+	a.indexHub.add(conn, "")
+	a.broadcastLobbyState()
 
 	go func() {
 		defer func() {
 			_ = conn.Close()
-			h.remove(conn)
-			h.broadcastCount()
+			a.indexHub.remove(conn)
+			a.broadcastLobbyState()
 		}()
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -162,7 +204,7 @@ func runIndexHubWebSocket(w http.ResponseWriter, r *http.Request, h *Hub) {
 	}()
 }
 
-func runRoomHubWebSocket(w http.ResponseWriter, r *http.Request, h *Hub, displayName string) {
+func runRoomHubWebSocket(w http.ResponseWriter, r *http.Request, a *App, h *Hub, displayName string) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade: %v", err)
@@ -174,12 +216,14 @@ func runRoomHubWebSocket(w http.ResponseWriter, r *http.Request, h *Hub, display
 	}
 	h.add(conn, displayName)
 	h.broadcastRoomState()
+	a.broadcastLobbyState()
 
 	go func() {
 		defer func() {
 			_ = conn.Close()
 			h.remove(conn)
 			h.broadcastRoomState()
+			a.broadcastLobbyState()
 		}()
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -209,7 +253,31 @@ func (a *App) getOrCreateHub(roomID string) *Hub {
 }
 
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
-	data := struct{ Count int }{Count: a.indexHub.count()}
+	a.mu.Lock()
+	lobbyCount := a.indexHub.count()
+	var ids []string
+	for id := range a.roomHubs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	rooms := make([]LobbyRoomRow, 0, len(ids))
+	for _, id := range ids {
+		cnt := a.roomHubs[id].count()
+		nm := a.roomNames[id]
+		var disp string
+		if nm == "" {
+			disp = "Room " + id
+		} else {
+			disp = nm + " · " + id
+		}
+		rooms = append(rooms, LobbyRoomRow{RoomID: id, DisplayName: disp, Count: cnt})
+	}
+	a.mu.Unlock()
+
+	data := struct {
+		LobbyCount int
+		Rooms      []LobbyRoomRow
+	}{LobbyCount: lobbyCount, Rooms: rooms}
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, "index.html", data); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
@@ -220,7 +288,7 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) indexWS(w http.ResponseWriter, r *http.Request) {
-	runIndexHubWebSocket(w, r, a.indexHub)
+	runIndexHubWebSocket(w, r, a)
 }
 
 func (a *App) createRoom(w http.ResponseWriter, r *http.Request) {
@@ -253,12 +321,15 @@ func (a *App) createRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Unlock()
 
+	a.broadcastLobbyState()
+
 	http.Redirect(w, r, "/"+id, http.StatusSeeOther)
 }
 
 func (a *App) roomPage(w http.ResponseWriter, r *http.Request) {
 	roomID := chi.URLParam(r, "roomID")
 	h := a.getOrCreateHub(roomID)
+	a.broadcastLobbyState()
 
 	a.mu.Lock()
 	name := a.roomNames[roomID]
@@ -286,7 +357,7 @@ func (a *App) roomWS(w http.ResponseWriter, r *http.Request) {
 	roomID := chi.URLParam(r, "roomID")
 	h := a.getOrCreateHub(roomID)
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	runRoomHubWebSocket(w, r, h, name)
+	runRoomHubWebSocket(w, r, a, h, name)
 }
 
 func main() {
