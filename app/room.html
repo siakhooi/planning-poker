@@ -91,14 +91,13 @@
 
       var stored = localStorage.getItem(key);
       if (stored && stored.trim()) {
-        enterRoom(stored);
-      } else {
-        input.focus();
-        form.addEventListener("submit", function (e) {
-          e.preventDefault();
-          enterRoom(input.value);
-        });
+        input.value = stored.trim();
       }
+      input.focus();
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        enterRoom(input.value);
+      });
     })();
   </script>
 </body>
